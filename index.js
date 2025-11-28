@@ -1,95 +1,78 @@
 import express from "express";
 import axios from "axios";
-import fs from "fs";
-import path from "path";
+import qs from "qs";
 
 const app = express();
 app.use(express.json());
 
-const DOWNLOADS_DIR = path.join(process.cwd(), "downloads");
-if (!fs.existsSync(DOWNLOADS_DIR)) {
-  fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
-}
+const PORT = process.env.PORT || 3000;
 
-app.use("/files", express.static(DOWNLOADS_DIR));
+// Optional: Add your Downloaderize cookies here for reliability
+const COOKIES = "ECDFCE%3Bnull%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2C583c583232c0c%22b5b5c0c%225bd8b25e4a8e8b8f4165800d53f35c%22c%225b17642948b4c%229700000x50a%5D%225c%05D%5D; FCNEC=%5B%5B%222AkR6iM8RN-LN5Ghi1p-skg5ToLG3PYZIkIYBpZDFmu7uUbU4R8fTn7rGmMbLcCUzecJqL25IjWcZpb-EUNXUSkJ2q_XorMtpps0n0npKMb2Pdo4Nj1iSuKRIaveenBBaek7GcSe0XOr0BtkDH71pPy9h-ITa%3D%3D%22%5D%5D"; // Example: "PHPSESSID=xxxx; other_cookie=yyy"
 
-// Extract track ID from Spotify URL
-function getTrackId(spotifyUrl) {
-  const match = spotifyUrl.match(/track\/([a-zA-Z0-9]+)/);
-  return match ? match[1] : null;
-}
-
-// Download MP3 from CDN and save locally
-async function downloadFromCDN(trackId, spotifyUrl, filename) {
-  const filepath = path.join(DOWNLOADS_DIR, filename);
-
-  // Skip download if file already exists
-  if (fs.existsSync(filepath)) return true;
-
-  // Construct dynamic CDN URL per track
-  const cdnUrl = `https://cdn-spotify-inter.zm.io.vn/download/${trackId}/GBCEL1300373?name=${spotifyUrl}`;
-
+// Function to fetch the MP3 link for a given Spotify track
+async function getDownloadLink(trackUrl) {
   try {
-    const response = await axios({
-      url: cdnUrl,
-      method: "GET",
-      responseType: "stream",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
-        Referer: "https://spotify.downloaderize.com", // optional but safer
-      },
+    const payload = qs.stringify({
+      action: "get_track",
+      track_url: trackUrl,
     });
 
-    const writer = fs.createWriteStream(filepath);
-    response.data.pipe(writer);
+    const response = await axios.post(
+      "https://spotify.downloaderize.com/wp-admin/admin-ajax.php",
+      payload,
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "User-Agent":
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
+          "Origin": "https://spotify.downloaderize.com",
+          "Referer": "https://spotify.downloaderize.com/",
+          "X-Requested-With": "XMLHttpRequest",
+          ...(COOKIES ? { Cookie: COOKIES } : {}),
+        },
+      }
+    );
 
-    return new Promise((resolve, reject) => {
-      writer.on("finish", () => resolve(true));
-      writer.on("error", reject);
-    });
-  } catch (e) {
-    console.log("Download error:", e.message);
-    return false;
+    const data = response.data;
+
+    if (
+      data.success &&
+      data.data &&
+      data.data.medias &&
+      data.data.medias.length > 0
+    ) {
+      // Extract the MP3 URL from medias[0]
+      const mp3Url = data.data.medias[0].url;
+      return { success: true, download: mp3Url };
+    } else {
+      return { success: false, message: "No MP3 URL found" };
+    }
+  } catch (err) {
+    return { success: false, message: err.message };
   }
 }
 
-// Handle incoming API requests
-async function handleRequest(trackUrl, res) {
-  if (!trackUrl)
-    return res.json({ success: false, message: "Missing trackUrl" });
-
-  const trackId = getTrackId(trackUrl);
-  if (!trackId)
-    return res.json({ success: false, message: "Invalid Spotify track URL" });
-
-  // Unique filename per track + timestamp
-  const filename = `track_${trackId}_${Date.now()}.mp3`;
-  const downloadLink = `${process.env.RENDER_EXTERNAL_URL}/files/${filename}`;
-
-  // Start download in background
-  downloadFromCDN(trackId, trackUrl, filename);
-
-  // Respond immediately with JSON link
-  res.json({
-    success: true,
-    download: downloadLink,
-  });
-}
-
 // POST endpoint
-app.post("/api/generate-link", (req, res) => {
+app.post("/api/generate-link", async (req, res) => {
   const { trackUrl } = req.body;
-  handleRequest(trackUrl, res);
+  if (!trackUrl) return res.json({ success: false, message: "Missing trackUrl" });
+
+  const result = await getDownloadLink(trackUrl);
+  res.json(result);
 });
 
 // GET endpoint
-app.get("/api/generate-link", (req, res) => {
+app.get("/api/generate-link", async (req, res) => {
   const trackUrl = req.query.trackUrl;
-  handleRequest(trackUrl, res);
+  if (!trackUrl) return res.json({ success: false, message: "Missing trackUrl" });
+
+  const result = await getDownloadLink(trackUrl);
+  res.json(result);
 });
 
+// Root endpoint
 app.get("/", (req, res) => res.send("Spotify JSON Download API running"));
 
-const PORT = process.env.PORT || 3000;
+// Start server
 app.listen(PORT, () => console.log(`Server running on PORT ${PORT}`));
