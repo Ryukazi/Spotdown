@@ -13,19 +13,21 @@ if (!fs.existsSync(DOWNLOADS_DIR)) {
 
 app.use("/files", express.static(DOWNLOADS_DIR));
 
+// Extract track ID from Spotify URL
 function getTrackId(spotifyUrl) {
   const match = spotifyUrl.match(/track\/([a-zA-Z0-9]+)/);
   return match ? match[1] : null;
 }
 
-// Download MP3 from CDN API
+// Download MP3 from CDN and save locally
 async function downloadFromCDN(trackId, spotifyUrl, filename) {
   const filepath = path.join(DOWNLOADS_DIR, filename);
 
-  // If file already exists, skip download
+  // Skip download if file already exists
   if (fs.existsSync(filepath)) return true;
 
-  const cdnUrl = `Https://cdn-spotify-inter.zm.io.vn/download/5XeFesFbtLpXzlVDNQP22n/GBCEL1300373?name=${spotifyUrl}`;
+  // Construct dynamic CDN URL per track
+  const cdnUrl = `https://cdn-spotify-inter.zm.io.vn/download/${trackId}/GBCEL1300373?name=${spotifyUrl}`;
 
   try {
     const response = await axios({
@@ -35,6 +37,7 @@ async function downloadFromCDN(trackId, spotifyUrl, filename) {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
+        Referer: "https://spotify.downloaderize.com", // optional but safer
       },
     });
 
@@ -51,7 +54,7 @@ async function downloadFromCDN(trackId, spotifyUrl, filename) {
   }
 }
 
-// Generate JSON download link for any Spotify track
+// Handle incoming API requests
 async function handleRequest(trackUrl, res) {
   if (!trackUrl)
     return res.json({ success: false, message: "Missing trackUrl" });
@@ -60,25 +63,27 @@ async function handleRequest(trackUrl, res) {
   if (!trackId)
     return res.json({ success: false, message: "Invalid Spotify track URL" });
 
-  // Filename includes trackId to make it unique per track
-  const filename = `track_${trackId}.mp3`;
+  // Unique filename per track + timestamp
+  const filename = `track_${trackId}_${Date.now()}.mp3`;
   const downloadLink = `${process.env.RENDER_EXTERNAL_URL}/files/${filename}`;
 
   // Start download in background
   downloadFromCDN(trackId, trackUrl, filename);
 
-  // Respond immediately with JSON
+  // Respond immediately with JSON link
   res.json({
     success: true,
     download: downloadLink,
   });
 }
 
+// POST endpoint
 app.post("/api/generate-link", (req, res) => {
   const { trackUrl } = req.body;
   handleRequest(trackUrl, res);
 });
 
+// GET endpoint
 app.get("/api/generate-link", (req, res) => {
   const trackUrl = req.query.trackUrl;
   handleRequest(trackUrl, res);
