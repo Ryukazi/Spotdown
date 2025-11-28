@@ -17,13 +17,12 @@ if (!fs.existsSync(DOWNLOADS_DIR)) {
 // Serve downloaded files statically
 app.use("/files", express.static(DOWNLOADS_DIR));
 
-// API: Generate download link
-app.post("/api/generate-link", async (req, res) => {
+// Unified function to download track and return JSON link
+async function downloadTrack(trackUrl, res) {
   try {
-    const { trackUrl } = req.body;
     if (!trackUrl) return res.json({ success: false, message: "Missing trackUrl" });
 
-    // Direct-download endpoint (streams audio)
+    // Direct-download endpoint
     const directEndpoint = `https://spotdown.org/api/check-direct-download?url=${trackUrl}`;
 
     // File name and path
@@ -34,7 +33,7 @@ app.post("/api/generate-link", async (req, res) => {
     const response = await axios({
       url: directEndpoint,
       method: "GET",
-      responseType: "stream"
+      responseType: "stream",
     });
 
     const writer = fs.createWriteStream(filepath);
@@ -43,17 +42,28 @@ app.post("/api/generate-link", async (req, res) => {
     writer.on("finish", () => {
       return res.json({
         success: true,
-        download: `${process.env.RENDER_EXTERNAL_URL}/files/${filename}`
+        download: `${process.env.RENDER_EXTERNAL_URL}/files/${filename}`,
       });
     });
 
     writer.on("error", () => {
       return res.json({ success: false, message: "File save failed" });
     });
-
   } catch (e) {
     return res.json({ success: false, message: e.message });
   }
+}
+
+// POST endpoint
+app.post("/api/generate-link", async (req, res) => {
+  const { trackUrl } = req.body;
+  downloadTrack(trackUrl, res);
+});
+
+// GET endpoint (query parameter)
+app.get("/api/generate-link", async (req, res) => {
+  const trackUrl = req.query.trackUrl;
+  downloadTrack(trackUrl, res);
 });
 
 // Root endpoint for testing
@@ -61,4 +71,4 @@ app.get("/", (req, res) => res.send("Download URL Generator API running"));
 
 // Start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on PORT", PORT));
+app.listen(PORT, () => console.log(`Server running on PORT ${PORT}`));
