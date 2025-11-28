@@ -13,7 +13,7 @@ if (!fs.existsSync(DOWNLOADS_DIR)) fs.mkdirSync(DOWNLOADS_DIR, { recursive: true
 // Serve downloaded MP3s
 app.use("/files", express.static(DOWNLOADS_DIR));
 
-// Function to download MP3 to server
+// Download MP3 to server
 async function downloadToServer(url, filename) {
   const filepath = path.join(DOWNLOADS_DIR, filename);
   if (fs.existsSync(filepath)) return filepath; // skip if already downloaded
@@ -34,13 +34,13 @@ async function downloadToServer(url, filename) {
   });
 }
 
-// API endpoint
-app.get("/api/spotify/download", async (req, res) => {
-  const trackUrl = req.query.url;
-  if (!trackUrl) return res.json({ success: false, message: "Missing track URL" });
+// New endpoint: /api/generate-link?trackUrl=
+app.get("/api/generate-link", async (req, res) => {
+  const trackUrl = req.query.trackUrl;
+  if (!trackUrl) return res.json({ success: false, message: "Missing trackUrl" });
 
   try {
-    // 1. Call ASMIT DWN20 API
+    // Fetch from ASMIT DWN20 API
     const asmitResponse = await axios.get("https://asmitdwn20.vercel.app/api/spotify/download", {
       params: { url: trackUrl },
       headers: { "User-Agent": "Mozilla/5.0" },
@@ -53,15 +53,15 @@ app.get("/api/spotify/download", async (req, res) => {
     const track = data.data;
     const originalCdnUrl = track.downloadLinks[0].url;
 
-    // 2. Download MP3 to server
+    // Download MP3 to server
     const trackId = trackUrl.match(/track\/([a-zA-Z0-9]+)/)?.[1] || Date.now();
     const filename = `track_${trackId}.mp3`;
     await downloadToServer(originalCdnUrl, filename);
 
-    // 3. Generate hosted link
+    // Hosted link
     const hostedLink = `${process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`}/files/${filename}`;
 
-    // 4. Return JSON with hosted link
+    // Return JSON with hosted link
     res.json({
       success: true,
       data: {
@@ -74,7 +74,7 @@ app.get("/api/spotify/download", async (req, res) => {
             url: hostedLink,
             quality: track.downloadLinks[0].quality,
             extension: track.downloadLinks[0].extension,
-            type: track.downloadLinks[0].type,
+            type: "audio",
           },
         ],
       },
